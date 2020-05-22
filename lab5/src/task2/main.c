@@ -1,63 +1,52 @@
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdio.h>
+#include <errno.h>
+#include <stdbool.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <unistd.h>
+#include <stdint.h>
+
 #include <getopt.h>
-#include <math.h>
 
-static uint64_t res = 1;
-static pthread_mutex_t fac_mtx = PTHREAD_MUTEX_INITIALIZER;
+uint32_t result = 1; /* A shared variable for threads */
+pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
+int mod;
+struct Args {
+  int begin;
+  int end;
+};
 
-typedef struct {
-  pthread_t thread;
-  uint64_t begin;
-  uint64_t end;
-  uint32_t mod;
-} fac_thread_t;
-
-static uint64_t MultModulo(uint64_t a, uint64_t b, uint64_t mod) {
-  uint64_t result = 0;
-  a = a % mod;
-
-  while (b > 0) {
-    if (b % 2 == 1)
-      result = (result + a) % mod;
-    a = (a * 2) % mod;
-    b /= 2;
+void Factorial(void *args) {
+  struct Args *thread_args = (struct Args *)args;
+  uint32_t thread_result = 1;
+  int i = (*thread_args).begin;
+  for (; i <= (*thread_args).end; i++){
+      thread_result *= i;
   }
 
-  return result % mod;
+  pthread_mutex_lock(&mut);
+  uint32_t temp = result;
+  printf("intermediate result %d : thread begins from %d  ends to %d -> result of thread %d\n", temp, (*thread_args).begin, (*thread_args).end, (temp * thread_result) % mod);
+  result = (temp * thread_result) % mod;
+  pthread_mutex_unlock(&mut);
 }
 
-static void fac_threaded(fac_thread_t* f) {
-  printf("Thread: id=%lu from %lu to %lu\n", f->thread, f->begin, f->end - 1);
-  for (uint64_t i = f->begin; i < f->end; i++) {
-    pthread_mutex_lock(&fac_mtx);
-    res = MultModulo(res, i, f->mod);
-    if (!res) {
-      printf("Error: uint64_t overflow (i=%lu)\n", i);
-      pthread_mutex_unlock(&fac_mtx);
-      return;
-    }
-    pthread_mutex_unlock(&fac_mtx);
-  }
-}
+int main(int argc, char **argv) {
+  int k = -1;
+  int pnum = -1;
+  mod = -1;
 
-int main(int argc, char* argv[]) {
-  uint64_t k = 0;
-  uint32_t pnum = 0;
-  uint32_t mod = 0;
-
-  while (1) {
+  while (true) {
     int current_optind = optind ? optind : 1;
 
     static struct option options[] = {{"k", required_argument, 0, 0},
                                       {"pnum", required_argument, 0, 0},
                                       {"mod", required_argument, 0, 0},
-                                      {}};
+                                      {0, 0, 0, 0}};
 
     int option_index = 0;
-    int c = getopt_long(argc, argv, "", options, &option_index);
+    int c = getopt_long(argc, argv, "f", options, &option_index);
 
     if (c == -1) break;
 
@@ -66,29 +55,30 @@ int main(int argc, char* argv[]) {
         switch (option_index) {
           case 0:
             k = atoi(optarg);
-            if (!k) {
-              printf("Error: bad k value\n");
-              return -1;
+            if (k <= 0) {
+            printf("k is a positive number\n");
+            return 1;
             }
             break;
           case 1:
             pnum = atoi(optarg);
-            if (!pnum) {
-              printf("Error: bad pnum value\n");
-              return -1;
+            if (pnum < 1) {
+            printf("pnum is a positive number\n");
+            return 1;
             }
             break;
           case 2:
             mod = atoi(optarg);
-            if (!mod) {
-              printf("Error: bad mod value\n");
-              return -1;
+            if (mod < 1) {
+            printf("mod is a positive number\n");
+            return 1;
             }
             break;
-          default:
+          defalut:
             printf("Index %d is out of options\n", option_index);
         }
         break;
+
       case '?':
         break;
 
@@ -103,39 +93,29 @@ int main(int argc, char* argv[]) {
   }
 
   if (k == -1 || pnum == -1 || mod == -1) {
-    printf("Usage: %s --k \"num\" --mod \"num\" --pnum \"num\" \n",
+    printf("Usage: %s --k \"num\" --pnum \"num\" --mod \"num\" \n",
            argv[0]);
     return 1;
   }
 
-  if (pnum > k / 2) {
-    pnum = k / 2;
-    printf("Warning: too much threads. Continue with %d\n", pnum);
+  pthread_t threads[pnum];
+  struct Args args[pnum];
+
+  int i;
+  for (i = 0; i < pnum; i++) {
+      args[i].begin = (k / pnum) * i + 1;
+      args[i].end = (k / pnum) * (i + 1);
+      if (pthread_create(&threads[i], NULL, (void *)Factorial, (void *)(args+i))) {
+      printf("Error: pthread_create failed!\n");
+      return 1;
+      }
   }
 
-  float block = (float)k / pnum;
-  fac_thread_t thread_pool[pnum];
-
-  for (uint32_t i = 0; i < pnum; i++) {
-    int begin = round(block * (float)i) + 1;
-    int end = round(block * (i + 1.f)) + 1;
-
-    thread_pool[i].begin = begin;
-    thread_pool[i].end = end;
-    thread_pool[i].mod = mod;
-
-    if (pthread_create(&thread_pool[i].thread, NULL, (void *)fac_threaded, (void*)&thread_pool[i]) != 0) {
-      printf("Error: cannot create new pthread\n");
-      return -1;
-    }
+  for (i = 0; i < pnum; i++) {
+    pthread_join(threads[i], NULL);
   }
 
-  for (uint32_t i = 0; i < pnum; i++)
-    if (pthread_join(thread_pool[i].thread, 0) != 0) {
-      printf("Error: cannot join thread %d\n", i);
-      return -1;
-    }
+  printf("\nResult: %d\n", result);
 
-  if (res)
-    printf("%lu! mod %d = %lu\n", k, mod, res);
+  return 0;
 }
