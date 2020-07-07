@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
   //Заполняем в структуру to - ip и port
   FILE* addresses2 = fopen(servers, "r");
   int i = 0;
-  while (!feof(addresses2)) {
+  while (fgets(buf, sizeof(buf), addresses2)) {
     fgets(buf, sizeof(buf), addresses2);
     strcpy((*(to+i)).ip, strtok(buf,":"));
     (*(to+i)).port = atoi(strtok(NULL, ":"));
