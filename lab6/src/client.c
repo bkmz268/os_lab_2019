@@ -13,7 +13,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include "factor.h"
+#include "factorial.h"
 
 bool ConvertStringToUI64(const char *str, uint64_t *val) {
   char *end = NULL;
@@ -45,27 +45,24 @@ pthread_mutex_t mut = PTHREAD_MUTEX_INITIALIZER;
 void ParallelServer(void *args) {
     struct ArgsForParallelServer *thread_args = (struct ArgsForParallelServer *)args;
 
-    //Информация и проверка хоста (имя, ip и т.д.)
     struct hostent *hostname = gethostbyname((*thread_args).to_server.ip);
     if (hostname == NULL) {
         fprintf(stderr, "gethostbyname failed with %s\n", (*thread_args).to_server.ip);
         exit(1);
     }
 
-    //Описываем сокет
     struct sockaddr_in server;
     server.sin_family = AF_INET;
     server.sin_port = htons((*thread_args).to_server.port);
     server.sin_addr.s_addr = *((unsigned long *)hostname->h_addr);
 
-    //Создаём ссылку на созданный коммуникационный узел, который обеспечивает интеграцию локальных сетей в единое целое
     int sck = socket(AF_INET, SOCK_STREAM, 0);
     if (sck < 0) {
         fprintf(stderr, "Socket creation failed!\n");
         exit(1);
     }
 
-    //Установления логического соединения со стороны клиента. У нас появится неявный bind(), так как на стороне клиента этот вызов делать не обязательно – при вызове connect ядро автоматически сделает необходимое связывание.
+   
     if (connect(sck, (struct sockaddr *)&server, sizeof(server)) < 0) {
         fprintf(stderr, "Connection failed\n");
         //fprintf(stderr, "error creating connection: %s ", strerror(errno));
@@ -73,7 +70,7 @@ void ParallelServer(void *args) {
     }
     printf("%s:%d connect\n", (*thread_args).to_server.ip, (*thread_args).to_server.port);
     
-    //Посылаем даные на сервер
+   
     uint64_t begin = (*thread_args).begin;
     uint64_t end = (*thread_args).end;
     uint64_t mod = (*thread_args).mod;
@@ -89,7 +86,7 @@ void ParallelServer(void *args) {
     }
     printf("%s:%d send: ( %lu, %lu ) mod = %lu\n", (*thread_args).to_server.ip, (*thread_args).to_server.port, begin, end, mod);
 
-    //Принимаем ответ
+  
     char response[sizeof(uint64_t)];
     if (recv(sck, response, sizeof(response), 0) < 0) {
       fprintf(stderr, "Recieve failed\n");
@@ -100,12 +97,12 @@ void ParallelServer(void *args) {
     memcpy(&answer, response, sizeof(uint64_t));
     printf("%s:%d answer: %lu\n", (*thread_args).to_server.ip, (*thread_args).to_server.port, answer);
     
-    //Блокируем
+   
     pthread_mutex_lock(&mut);
     int temp = result;
     result = (temp * answer) % mod;
     pthread_mutex_unlock(&mut);
-    //Разблокируем
+   
     
     close(sck);
 }
@@ -130,7 +127,6 @@ int main(int argc, char **argv) {
       switch (option_index) {
       case 0:
         f = ConvertStringToUI64(optarg, &k);
-        // TODO: your code here
         if (!f) {
             printf("incorrect value k\n");
             return -1;
@@ -138,14 +134,12 @@ int main(int argc, char **argv) {
         break;
       case 1:
         f = ConvertStringToUI64(optarg, &mod);
-        // TODO: your code here
         if (!f) {
             printf("incorrect value mod\n");
             return -1;
         }
         break;
       case 2:
-        // TODO: your code here
         memcpy(servers, optarg, strlen(optarg));
         break;
       default:
@@ -165,23 +159,22 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  //Считываем адреса и разбиваем
   FILE* addresses = fopen(servers, "r");
   if (addresses == NULL) {
     printf("cannot read addresses");
     return -1;
   }
-  //Подсчитываем кол-во адресов
+
   char buf[256];
   unsigned int servers_num = 0;
   while(fgets(buf,256,addresses) != NULL)
     servers_num++;
   struct Server *to = malloc(sizeof(struct Server) * servers_num);
   fclose(addresses);
-  //Заполняем в структуру to - ip и port
+
   FILE* addresses2 = fopen(servers, "r");
   int i = 0;
-  while (fgets(buf, sizeof(buf), addresses2)) {
+  while (!feof(addresses2)) {
     fgets(buf, sizeof(buf), addresses2);
     strcpy((*(to+i)).ip, strtok(buf,":"));
     (*(to+i)).port = atoi(strtok(NULL, ":"));
@@ -194,11 +187,9 @@ int main(int argc, char **argv) {
   }
 
   sleep(1);
-  //Создаём N потоков
+
   pthread_t threads[servers_num];
-  //Создаём N аргументов под них
   struct ArgsForParallelServer args[servers_num];
-  //Разбиваем данные под отд сервера и открываем потоки
   for (i = 0; i < servers_num; i++) {
     args[i].to_server = *(to+i);
     args[i].begin = (k / servers_num) * i + 1;
@@ -209,7 +200,7 @@ int main(int argc, char **argv) {
         return 1;
     }
   }
-  //Завершаем потоки
+
   for (i = 0; i < servers_num; i++) 
     pthread_join(threads[i], NULL);
 
